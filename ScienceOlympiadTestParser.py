@@ -1,5 +1,4 @@
-!pip install pdf2image opencv-python-headless
-!apt-get install -y poppler-utils
+# -*- coding: utf-8 -*-
 
 import os
 from google.colab import drive
@@ -13,7 +12,8 @@ drive.mount('/content/drive')
 
 pdf_path = '/content/drive/MyDrive/geomap.pdf'
 
-output_folder = '/content/drive/MyDrive/Extracted'  os.makedirs(output_folder, exist_ok=True)
+output_folder = '/content/drive/MyDrive/Extracted'
+os.makedirs(output_folder, exist_ok=True)
 
 viz_folder = os.path.join(output_folder, 'visualizations')
 diag_folder = os.path.join(output_folder, 'diagnostics')
@@ -23,23 +23,21 @@ os.makedirs(diag_folder, exist_ok=True)
 def create_merged_pdf_image():
     """Merge all pages of the PDF into a single tall image with improved handling"""
     print("Converting PDF to images for merging...")
-        pages = convert_from_path(pdf_path, 300)
+    pages = convert_from_path(pdf_path, 300)
     print(f"Converted {len(pages)} pages")
 
-        width = pages[0].width
+    width = pages[0].width
     total_height = sum(page.height for page in pages)
 
-        merged_image = Image.new('RGB', (width, total_height + 20 * (len(pages) - 1)), (255, 255, 255))
+    merged_image = Image.new('RGB', (width, total_height + 20 * (len(pages) - 1)), (255, 255, 255))
 
-        y_offset = 0
+    y_offset = 0
     for i, page in enumerate(pages):
-                page.save(f"{diag_folder}/original_page_{i+1}.png")
+        page.save(f"{diag_folder}/original_page_{i+1}.png")
+        merged_image.paste(page, (0, y_offset))
+        y_offset += page.height + 20
 
-                merged_image.paste(page, (0, y_offset))
-
-                y_offset += page.height + 20
-
-        merged_path = os.path.join(output_folder, "merged_pdf.png")
+    merged_path = os.path.join(output_folder, "merged_pdf.png")
     merged_image.save(merged_path)
     print(f"Created merged image at {merged_path}")
 
@@ -47,52 +45,46 @@ def create_merged_pdf_image():
 
 def detect_and_save_boxes(image, page_identifier):
     """Detect rectangular boxes in an image and save them"""
-        img_np = np.array(image)
+    img_np = np.array(image)
+    img_visual = img_np.copy()
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        img_visual = img_np.copy()
-
-        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-            binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+    binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY_INV, 11, 2)
 
-        kernel = np.ones((3, 3), np.uint8)
+    kernel = np.ones((3, 3), np.uint8)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
-        binary_filename = f"{diag_folder}/{page_identifier}_binary.png"
+    binary_filename = f"{diag_folder}/{page_identifier}_binary.png"
     cv2.imwrite(binary_filename, binary)
 
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        height, width = img_np.shape[:2]
+    height, width = img_np.shape[:2]
+    extracted_boxes = []
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-        extracted_boxes = []
+    for i, contour in enumerate(contours):
+        area = cv2.contourArea(contour)
+        x, y, w, h = cv2.boundingRect(contour)
 
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)
-
-        for i, contour in enumerate(contours):
-                area = cv2.contourArea(contour)
-
-                x, y, w, h = cv2.boundingRect(contour)
-
-                                        if (area < 15000 or
+        if (area < 15000 or
             w < width * 0.3 or
             h < 50):
             continue
 
-                cv2.rectangle(img_visual, (x, y), (x+w, y+h), (0, 255, 0), 3)
+        cv2.rectangle(img_visual, (x, y), (x+w, y+h), (0, 255, 0), 3)
         cv2.putText(img_visual, f"{i+1}", (x+10, y+30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-                box_img = img_np[y:y+h, x:x+w]
+        box_img = img_np[y:y+h, x:x+w]
         box_filename = f"{output_folder}/question_box{i+1}.png"
         cv2.imwrite(box_filename, cv2.cvtColor(box_img, cv2.COLOR_RGB2BGR))
 
         extracted_boxes.append((box_filename, x, y, w, h, i+1))
 
-        viz_filename = f"{viz_folder}/{page_identifier}_detected.png"
+    viz_filename = f"{viz_folder}/{page_identifier}_detected.png"
     cv2.imwrite(viz_filename, cv2.cvtColor(img_visual, cv2.COLOR_RGB2BGR))
 
     return extracted_boxes
